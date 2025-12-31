@@ -361,55 +361,80 @@
 
 
         // Initialize camera
-        async function startCamera() {
-                const token = checkAuthentication();
-                if (!token) return;
+       async function startCamera() {
+            const token = checkAuthentication();
+            if (!token) return;
 
-                // Detener stream previo
-                if (currentStream) {
-                    currentStream.getTracks().forEach(track => track.stop());
-                    currentStream = null;
-                }
+            // 1. DETENER EL STREAM ANTERIOR CORRECTAMENTE
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => {
+                    track.stop(); // Detiene el hardware
+                });
+            }
 
+            // 2. LIMPIAR LA ETIQUETA DE VIDEO (Crucial en iOS/Android)
+            if (video.srcObject) {
+                video.srcObject = null;
+            }
+            currentStream = null;
+
+            // Esperamos 300ms para que el SO libere la cámara totalmente.
+            await new Promise(resolve => setTimeout(resolve, 300));
+
+            try {
+                // Intentar configuración exacta primero
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: { exact: currentFacingMode },
+                        width: { ideal: 1920 }, // Pedir alta resolución si es posible
+                        height: { ideal: 1080 }
+                    },
+                    audio: false
+                });
+
+                handleStreamSuccess(stream);
+
+            } catch (err) {
+                console.warn('Fallo constraints "exact", intentando modo flexible...', err);
+
+                // Fallback: Modo flexible (necesario para algunos Androids/iOS antiguos)
                 try {
                     const stream = await navigator.mediaDevices.getUserMedia({
                         video: {
-                            facingMode: { exact: currentFacingMode }
+                            facingMode: currentFacingMode,
+                            width: { ideal: 1920 },
+                            height: { ideal: 1080 }
                         },
                         audio: false
                     });
 
-                    video.srcObject = stream;
-                    currentStream = stream;
+                    handleStreamSuccess(stream);
 
-                    messageDiv.textContent = 'Cámara lista. Selecciona una plantilla.';
-
-                    // Cargar templates solo la primera vez
-                    if (!templatesGrid.hasChildNodes()) {
-                        loadTemplates();
-                    }
-
-                } catch (err) {
-                    // Fallback si exact no funciona (muy común)
-                    try {
-                        const stream = await navigator.mediaDevices.getUserMedia({
-                            video: { facingMode: currentFacingMode },
-                            audio: false
-                        });
-
-                        video.srcObject = stream;
-                        currentStream = stream;
-                        messageDiv.textContent = 'Cámara lista. Selecciona una plantilla.';
-
-                    } catch (finalErr) {
-                        console.error('Error accessing camera:', finalErr);
-                        messageDiv.textContent = 'Error: No se pudo acceder a la cámara.';
-                        messageDiv.style.color = '#ff6b6b';
-                        captureBtn.disabled = true;
-                    }
+                } catch (finalErr) {
+                    console.error('Error fatal accediendo a cámara:', finalErr);
+                    messageDiv.textContent = 'Error: No se puede cambiar de cámara. Verifica permisos.';
+                    messageDiv.style.color = '#ff6b6b';
+                    captureBtn.disabled = true;
                 }
             }
+        }
 
+        // Función auxiliar para no repetir código de éxito
+        function handleStreamSuccess(stream) {
+            video.srcObject = stream;
+            currentStream = stream;
+            messageDiv.textContent = 'Cámara lista. Selecciona una plantilla.';
+
+            // Aseguramos que el video se reproduzca (fix para Safari iPhone)
+            video.onloadedmetadata = () => {
+                video.play();
+            };
+
+            // Cargar templates solo la primera vez
+            if (!templatesGrid.hasChildNodes()) {
+                loadTemplates();
+            }
+        }
 
         async function checkMultipleCameras() {
                 const devices = await navigator.mediaDevices.enumerateDevices();
